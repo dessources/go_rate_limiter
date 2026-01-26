@@ -16,7 +16,7 @@ type HTTPContext struct {
 }
 
 type RouteHandler func(ctx HTTPContext)
-type LimiterMiddleware func(http.Handler) http.Handler
+type Middleware func(http.Handler) http.Handler
 
 type UrlShortenerPayload struct {
 	Original string `json:"original"`
@@ -37,13 +37,25 @@ func main() {
 	}
 
 	idleConnsClosed := make(chan struct{})
-	limiterMiddleware, shorten, retrieve := initialize(idleConnsClosed, server)
+	enableGracefulShutdown(idleConnsClosed, server)
+
+	//create global limiter & middleware
+	globalLimiter, globalRateLimit := initializeGlobalLimiter()
+
+	//create per client limiter & middleware
+	perClientLimiter, perClientRateLimit := initializePerClientLimiter()
+
+	//middlware composer
+	withMiddlewares := ComposeMiddlewares(globalRateLimit, perClientRateLimit)
+
+	//create url shortener
+	shortener, shorten, retrieve := createUrlShortener()
 
 	//create server
 	mux := http.NewServeMux()
-	mux.Handle("/", limiterMiddleware(AsHandler(Index)))
-	mux.Handle("GET /{shortUrl}", limiterMiddleware(AsHandler(retrieve)))
-	mux.Handle("POST /shorten", limiterMiddleware(AsHandler(shorten)))
+	mux.Handle("/", globalRateLimit(AsHandler(Index)))
+	mux.Handle("GET /{shortUrl}", withMiddlewares(AsHandler(retrieve)))
+	mux.Handle("POST /shorten", withMiddlewares(AsHandler(shorten)))
 	server.Handler = mux
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
@@ -52,40 +64,13 @@ func main() {
 
 	//wait for graceful shutdown
 	<-idleConnsClosed
+	globalLimiter.Offline()
+	shortener.Offline()
+	perClientLimiter.Offline()
+
 }
 
-func createUrlShortener() (UrlShortener, RouteHandler, RouteHandler) {
-	s, err := NewUrlShortener(InMemory, 100000, time.Hour)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return s,
-		func(ctx HTTPContext) {
-			ShortenUrl(s, ctx)
-		},
-		func(ctx HTTPContext) {
-			RetrieveUrl(s, ctx)
-		}
-}
-
-func createLimiterMiddleware() (*Limiter, LimiterMiddleware) {
-	var limiter *Limiter
-	if l, err := NewLimiter(InMemory, 50000, 50000, 10000); err != nil {
-		log.Fatal(err)
-	} else {
-		limiter = l
-	}
-
-	return limiter, func(next http.Handler) http.Handler {
-		return AsHandler(func(ctx HTTPContext) { LimiteRate(limiter, ctx, next) })
-	}
-}
-
-func initialize(done chan struct{}, server *http.Server) (LimiterMiddleware, RouteHandler, RouteHandler) {
-	//create limiter & middleware
-	limiter, limiterMiddleware := createLimiterMiddleware()
-	//create url shortener
-	shortener, shorten, retrieve := createUrlShortener()
+func enableGracefulShutdown(done chan struct{}, server *http.Server) {
 
 	// enable Graceful Exit
 	go func() {
@@ -99,10 +84,7 @@ func initialize(done chan struct{}, server *http.Server) (LimiterMiddleware, Rou
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("HTTP server Shutdown: %v", err)
 		}
-		limiter.Stop()
-		shortener.Offline()
 		close(done)
 	}()
 
-	return limiterMiddleware, shorten, retrieve
 }

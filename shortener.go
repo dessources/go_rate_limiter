@@ -63,9 +63,13 @@ func (m *InMemoryUrlMap) RetrieveUrl(s string) (string, error) {
 func (m *InMemoryUrlMap) RemoveMapping(short string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.mapping, short)
-	m.len--
-	return nil
+	if m.mapping[short] != nil {
+		delete(m.mapping, short)
+		m.len--
+		return nil
+	}
+
+	return errors.New("Url not found")
 }
 
 func (m *InMemoryUrlMap) RegularlyResetMappings() {

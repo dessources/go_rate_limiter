@@ -69,29 +69,29 @@ func (b *MemoryBucket) Capacity() int {
 }
 
 // ----------------Limiter definition-----------
-type Limiter struct {
+type GlobalLimiter struct {
 	bucket TokenStore
 	rate   int //token refill rate per second
 	done   chan struct{}
 }
 
-func newLimiter(rate int, store TokenStore) *Limiter {
+func newLimiter(rate int, store TokenStore) *GlobalLimiter {
 
 	done := make(chan struct{})
-	limiter := Limiter{store, rate, done}
+	limiter := GlobalLimiter{store, rate, done}
 	go limiter.AddTokens()
 	return &limiter
 }
 
-func (l *Limiter) Allow(size int) bool {
+func (l *GlobalLimiter) Allow(size int) bool {
 	return l.bucket.Debit(size)
 }
 
-func (l *Limiter) Stop() {
+func (l *GlobalLimiter) Offline() {
 	close(l.done)
 }
 
-func (l *Limiter) AddTokens() {
+func (l *GlobalLimiter) AddTokens() {
 	ticker := time.NewTicker(time.Second / time.Duration(l.rate))
 	for {
 		select {
@@ -104,8 +104,8 @@ func (l *Limiter) AddTokens() {
 	}
 }
 
-func NewLimiter(storageType StorageType, count, cap, rate int) (*Limiter, error) {
-	var limiter *Limiter
+func NewLimiter(storageType StorageType, count, cap, rate int) (*GlobalLimiter, error) {
+	var limiter *GlobalLimiter
 
 	switch storageType {
 	case InMemory:

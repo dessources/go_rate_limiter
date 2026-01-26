@@ -47,7 +47,7 @@ func ShortenUrl(s UrlShortener, ctx HTTPContext) {
 		return
 	} else {
 		ctx.w.WriteHeader(http.StatusCreated)
-		fmt.Fprintf(ctx.w, "Short URL: %s", shortUrl)
+		fmt.Fprintf(ctx.w, "Short URL: %s\n", shortUrl)
 	}
 
 }
