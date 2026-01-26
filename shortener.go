@@ -15,7 +15,7 @@ const (
 )
 
 type UrlShortener interface {
-	AddMapping(original, short string) error
+	AddMapping(original, short string) (bool, error)
 	RetrieveUrl(short string) (string, error)
 	RemoveMapping(short string) error
 	RegularlyResetMappings()
@@ -38,15 +38,18 @@ type InMemoryUrlMap struct {
 	mu      sync.RWMutex
 }
 
-func (m *InMemoryUrlMap) AddMapping(original, short string) error {
+func (m *InMemoryUrlMap) AddMapping(original, short string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.len < m.cap {
+		if m.mapping[short] != nil {
+			return true, nil
+		}
 		m.len++
 		m.mapping[short] = &UrlMapping{original, time.Now()}
-		return nil
+		return false, nil
 	} else {
-		return errors.New("Url map is full.")
+		return false, errors.New("Url map is full.")
 	}
 }
 
@@ -73,14 +76,14 @@ func (m *InMemoryUrlMap) RemoveMapping(short string) error {
 }
 
 func (m *InMemoryUrlMap) RegularlyResetMappings() {
-	ticker := time.NewTicker(m.ttl)
+	ticker := time.NewTicker(m.ttl / 2)
 	for {
 		select {
 		case <-ticker.C:
 			m.mu.Lock()
 
 			for key, val := range m.mapping {
-				if time.Since(val.createdAt) > time.Duration(m.ttl) {
+				if time.Since(val.createdAt) > m.ttl {
 
 					delete(m.mapping, key)
 					m.len--
@@ -136,13 +139,11 @@ func Shorten(s UrlShortener, original string) (string, error) {
 		}
 
 		shortUrl = result.String()
-		if match, _ := s.RetrieveUrl(shortUrl); match == "" {
+		if match, err := s.AddMapping(original, shortUrl); err != nil {
+			return "", err
+		} else if !match {
 			collision = false
 		}
-	}
-
-	if err := s.AddMapping(original, shortUrl); err != nil {
-		return "", err
 	}
 
 	return shortUrl, nil

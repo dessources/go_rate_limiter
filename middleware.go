@@ -20,6 +20,7 @@ func LimitRateGlobal(limiter *GlobalLimiter, ctx HTTPContext, next http.Handler)
 func LimitRatePerClient(limiter *PerClientLimiter, ctx HTTPContext, next http.Handler) {
 
 	clientId := ctx.req.Header.Get("X-API-Key")
+
 	if clientId == "" {
 		fmt.Println("Invalid API key provided")
 		http.Error(ctx.w, "Invalid api key provided", http.StatusUnauthorized)
@@ -74,14 +75,10 @@ func ComposeMiddlewares(r ...Middleware) Middleware {
 	}
 
 	return func(h http.Handler) http.Handler {
-		var acc http.Handler
+		acc := r[len(r)-1](h)
 
-		for i, curr := range r {
-			if i == 0 {
-				acc = curr(h)
-			} else {
-				acc = curr(acc)
-			}
+		for i := len(r) - 2; i >= 0; i-- {
+			acc = r[i](acc)
 		}
 		return acc
 	}

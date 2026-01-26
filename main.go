@@ -54,7 +54,7 @@ func main() {
 	//create server
 	mux := http.NewServeMux()
 	mux.Handle("/", globalRateLimit(AsHandler(Index)))
-	mux.Handle("GET /{shortUrl}", withMiddlewares(AsHandler(retrieve)))
+	mux.Handle("GET /s/{shortUrl}", withMiddlewares(AsHandler(retrieve)))
 	mux.Handle("POST /shorten", withMiddlewares(AsHandler(shorten)))
 	server.Handler = mux
 

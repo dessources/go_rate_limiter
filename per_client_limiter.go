@@ -9,37 +9,66 @@ import (
 const ttl = time.Minute * 30
 
 type TimeLogStore interface {
-	Add(key string, time time.Time) error
+	Add(key string, window time.Duration) error
 	Remove(key string) error
-	RemoveOld(key string, window time.Duration) error
 	Clean() error
-	GetCount(key string) (int, error)
-	//GetAll() (map[string][]time.Time, error)
 
 	Cap() int
 	Len() int
 }
 
 type InMemoryTimeLogStore struct {
-	cap  int
-	len  int
-	logs map[string][]time.Time
-	mu   sync.RWMutex
+	cap   int
+	len   int
+	limit int
+	logs  map[string][]time.Time
+	mu    sync.RWMutex
 }
 
-func (s *InMemoryTimeLogStore) Add(k string, t time.Time) error {
+func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if len(s.logs[k]) == 0 {
+	//if new client, check global capacity
+	if _, exists := s.logs[k]; exists {
+
+		// remove old
+		//delete entry if all logs old
+		var lastLog time.Time
+		if lastLogIndex := len(s.logs[k]) - 1; lastLogIndex >= 0 {
+			lastLog = s.logs[k][len(s.logs[k])-1]
+			if time.Since(lastLog) >= w {
+				delete(s.logs, k)
+				s.len--
+			} else {
+				//find first log within window and resize slize
+				for i, logTime := range s.logs[k] {
+					if time.Since(logTime) < w {
+						s.logs[k] = s.logs[k][i:]
+
+						break
+					}
+				}
+			}
+		}
+
+	} else {
 		if s.len >= s.cap {
 			return errors.New("Storage is at capacity.")
 		}
-		s.len++
+
 	}
 
-	s.logs[k] = append(s.logs[k], t)
+	// check rate limit
+	if _, exists := s.logs[k]; !exists {
+		s.logs[k] = make([]time.Time, 0)
+		s.len++
+	} else if len(s.logs[k]) >= s.limit {
+		return errors.New("Rate limit exceeded. Please try again later")
+	}
 
+	//add log
+	s.logs[k] = append(s.logs[k], time.Now())
 	return nil
 
 }
@@ -48,61 +77,34 @@ func (s *InMemoryTimeLogStore) Remove(k string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if len(s.logs[k]) > 0 {
-		delete(s.logs, k)
-		s.len--
-		return nil
+	if _, exists := s.logs[k]; !exists {
+		return errors.New("Entry not found")
 	}
-	return errors.New("Entry not found")
-}
-
-func (s *InMemoryTimeLogStore) RemoveOld(k string, window time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for i, logTime := range s.logs[k] {
-		if time.Since(logTime) < window {
-			s.logs[k] = s.logs[k][i:]
-			return nil
-		}
-	}
-	//if we reached this part all logs are older than window so we remove the whole entry
-	if len(s.logs[k]) > 0 {
-		s.len--
-		delete(s.logs, k)
-	}
-
+	delete(s.logs, k)
+	s.len--
 	return nil
+
 }
 
 func (s *InMemoryTimeLogStore) Clean() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
+	keysToDelete := []string{}
 	for key, val := range s.logs {
 		if len(val) > 0 {
 			lastRequestTime := val[len(val)-1]
 			if time.Since(lastRequestTime) > ttl {
-				delete(s.logs, key)
-				s.len--
+				keysToDelete = append(keysToDelete, key)
 			}
 		}
 	}
+
+	for _, key := range keysToDelete {
+		delete(s.logs, key)
+		s.len--
+	}
 	return nil
 }
-
-func (s *InMemoryTimeLogStore) GetCount(k string) (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return len(s.logs[k]), nil
-}
-
-// func (s *InMemoryTimeLogStore) GetAll() (map[string][]time.Time, error) {
-// 	s.mu.RLock()
-// 	defer s.mu.RUnlock()
-// 	return s.logs, nil
-// }
 
 func (s *InMemoryTimeLogStore) Cap() int {
 	s.mu.RLock()
@@ -133,30 +135,11 @@ func (l *PerClientLimiter) RegularlyRemoveOldClients() {
 type PerClientLimiter struct {
 	timeLogStore TimeLogStore
 	window       time.Duration
-	limit        int
 	done         chan struct{}
 }
 
 func (l *PerClientLimiter) Allow(clientID string) error {
-	store := l.timeLogStore
-
-	if err := store.RemoveOld(clientID, l.window); err != nil {
-		return errors.New("An error was encountered while removing old request logs")
-	}
-
-	count, err := store.GetCount(clientID)
-	if err != nil {
-		return errors.New("An error was encountered while reading request counts")
-	}
-
-	if count >= l.limit {
-		return errors.New("Rate limit exceeded. Please try again later")
-	} else {
-		if err := store.Add(clientID, time.Now()); err != nil {
-			return err
-		}
-		return nil
-	}
+	return l.timeLogStore.Add(clientID, l.window)
 }
 
 func (l *PerClientLimiter) Offline() {
@@ -170,8 +153,8 @@ func NewPerClientLimiter(storateType StorageType, cap int, limit int, window tim
 	case InMemory:
 		logs := make(map[string][]time.Time)
 		done := make(chan struct{})
-		timeLogStore := &InMemoryTimeLogStore{cap: cap, logs: logs}
-		limiter = PerClientLimiter{timeLogStore, window, limit, done}
+		timeLogStore := &InMemoryTimeLogStore{cap: cap, logs: logs, limit: limit}
+		limiter = PerClientLimiter{timeLogStore, window, done}
 
 		go limiter.RegularlyRemoveOldClients()
 
