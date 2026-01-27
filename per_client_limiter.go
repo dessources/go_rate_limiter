@@ -52,20 +52,17 @@ func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
 }
 
 func (s *InMemoryTimeLogStore) RemoveOldLogs(k string, w time.Duration) {
-	// remove old
-	//delete entry if all logs old
-	var lastLog time.Time
+
 	if lastLogIndex := len(s.logs[k]) - 1; lastLogIndex >= 0 {
-		lastLog = s.logs[k][len(s.logs[k])-1]
+		lastLog := s.logs[k][lastLogIndex]
 		if time.Since(lastLog) >= w {
 			// All logs are old, reset the slice
 			s.logs[k] = s.logs[k][:0]
 		} else {
-			//find first log within window and resize slize
+			//find first log within window and resize slice
 			for i, logTime := range s.logs[k] {
 				if time.Since(logTime) < w {
 					s.logs[k] = s.logs[k][i:]
-
 					break
 				}
 			}

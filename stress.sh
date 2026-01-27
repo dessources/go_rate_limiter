@@ -19,20 +19,20 @@ echo ""
 # Test 1: Index route (global limit only)
 # ============================================
 echo "--- Test 1: Index route (global limit only) ---"
-hey -n 200 -c 20 -t 5 "$BASE_URL/" 2>/dev/null | grep -E "responses|Status"
+hey -n 100000 -c 30 -t 5 "$BASE_URL/" 2>/dev/null | grep -E "responses|Status"
 echo ""
 
 # ============================================
 # Test 2: Missing API key (should return 401)
 # ============================================
 echo "--- Test 2: Missing API key on protected route ---"
-curl -s -w "Status: %{http_code}\n" "$BASE_URL/testshort"
+curl -s -w "Status: %{http_code}\n" "$BASE_URL/s/testshort"
 echo ""
 
 # ============================================
-# Test 3: POST /shorten - create a short URL
+# Test 3: POST /shorten - create a short URL to example.com
 # ============================================
-echo "--- Test 3: Create short URL ---"
+echo "--- Test 3: Create short URL to example.com ---"
 SHORTEN_RESPONSE=$(curl -s -X POST \
   -H "X-API-Key: testclient1" \
   -H "Content-Type: application/json" \
@@ -46,9 +46,9 @@ echo "Extracted short code: $SHORT_CODE"
 echo ""
 
 # ============================================
-# Test 4: GET /{shortUrl} - retrieve and redirect
+# Test 4: GET /{shortUrl} - retrieve and redirect to example.com
 # ============================================
-echo "--- Test 4: Retrieve short URL (should redirect) ---"
+echo "--- Test 4: Retrieve short URL (should redirect to example.com ) ---"
 curl -s -w "Status: %{http_code}\n" -H "X-API-Key: testclient1" -L "$BASE_URL/s/$SHORT_CODE" | head -5
 echo ""
 

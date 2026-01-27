@@ -17,8 +17,7 @@ func MakeGlobalRateLimitMiddleware() (Middleware, func(), error) {
 			if limiter.Allow(1) {
 				next.ServeHTTP(w, r)
 			} else {
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte("Request rejected by rate limiter"))
+				http.Error(w, "We're a bit busy right now. Please try again later.", http.StatusTooManyRequests)
 				return
 			}
 		})
