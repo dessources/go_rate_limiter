@@ -51,6 +51,7 @@ func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
 	return nil
 }
 
+// RemoveOldLogs assumes caller holds s.mu.Lock()
 func (s *InMemoryTimeLogStore) RemoveOldLogs(k string, w time.Duration) {
 
 	if lastLogIndex := len(s.logs[k]) - 1; lastLogIndex >= 0 {
