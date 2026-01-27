@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-type HTTPContext struct {
-	w   http.ResponseWriter
-	req *http.Request
-}
-
-type RouteHandler func(ctx HTTPContext)
 type Middleware func(http.Handler) http.Handler
 
 type UrlShortenerPayload struct {
@@ -32,6 +26,7 @@ const (
 const maxUrlLength = 2048
 
 func main() {
+
 	server := &http.Server{
 		Addr: ":8090",
 	}
@@ -40,22 +35,36 @@ func main() {
 	enableGracefulShutdown(idleConnsClosed, server)
 
 	//create global limiter & middleware
-	globalLimiter, globalRateLimit := initializeGlobalLimiter()
+	globalRateLimiter, globalRateLimiterCleanup, err := MakeGlobalRateLimitMiddleware()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer globalRateLimiterCleanup()
 
 	//create per client limiter & middleware
-	perClientLimiter, perClientRateLimit := initializePerClientLimiter()
+	perClientRateLimiter, perClientRateLimiterCleanup, err := MakePerClientRateLimitMiddleware()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer perClientRateLimiterCleanup()
 
-	//middlware composer
-	withMiddlewares := ComposeMiddlewares(globalRateLimit, perClientRateLimit)
+	//middleware composer
+	withMiddlewares := ComposeMiddlewares(globalRateLimiter, perClientRateLimiter)
 
-	//create url shortener
-	shortener, shorten, retrieve := createUrlShortener()
+	//create features struct with shortener methods
+	shortener, err := NewUrlShortener(InMemory, 100000, time.Hour)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer shortener.Offline()
 
-	//create server
+	features := &Features{shortener}
+
+	//Route handlers
 	mux := http.NewServeMux()
-	mux.Handle("/", globalRateLimit(AsHandler(Index)))
-	mux.Handle("GET /s/{shortUrl}", withMiddlewares(AsHandler(retrieve)))
-	mux.Handle("POST /shorten", withMiddlewares(AsHandler(shorten)))
+	mux.Handle("/", globalRateLimiter(http.HandlerFunc(Index)))
+	mux.Handle("GET /s/{shortUrl}", withMiddlewares(http.HandlerFunc(features.RetrieveUrl)))
+	mux.Handle("POST /shorten", withMiddlewares(http.HandlerFunc(features.ShortenUrl)))
 	server.Handler = mux
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
@@ -64,9 +73,6 @@ func main() {
 
 	//wait for graceful shutdown
 	<-idleConnsClosed
-	globalLimiter.Offline()
-	shortener.Offline()
-	perClientLimiter.Offline()
 
 }
 

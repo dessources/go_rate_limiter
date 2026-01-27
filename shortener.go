@@ -112,43 +112,6 @@ func (m *InMemoryUrlMap) Offline() {
 	close(m.done)
 }
 
-// Shorten functionality definition
-
-const ShortUrlLength int = 10
-
-var charTypes = [3]rune{48, 65, 97} // ascii start value for numbers, upper & lower letters
-
-func Shorten(s UrlShortener, original string) (string, error) {
-
-	var shortUrl string
-	var collision = true
-	for collision {
-		var result strings.Builder
-		var charPos int
-		var charType int
-		for range ShortUrlLength {
-
-			if charType = rand.IntN(3); charType == 0 {
-				charPos = rand.IntN(10)
-			} else {
-				charPos = rand.IntN(26)
-			}
-
-			char := charTypes[charType] + rune(charPos)
-			result.WriteRune(char)
-		}
-
-		shortUrl = result.String()
-		if match, err := s.AddMapping(original, shortUrl); err != nil {
-			return "", err
-		} else if !match {
-			collision = false
-		}
-	}
-
-	return shortUrl, nil
-}
-
 func NewUrlShortener(storageType StorageType, cap int, ttl time.Duration) (UrlShortener, error) {
 	if cap < MinCap {
 		return nil, fmt.Errorf("Capacity has to be at least %d", MinCap)
@@ -173,4 +136,44 @@ func NewUrlShortener(storageType StorageType, cap int, ttl time.Duration) (UrlSh
 	}
 
 	return nil, errors.New("Unknown error in initializing url shortener.")
+}
+
+//--------------------------------------------------------------------------
+// Shorten functionality definition
+//-------------------------------------------------------------------------
+
+const ShortUrlLength int = 10
+
+var charTypes = [3]rune{48, 65, 97} // ascii start value for numbers, upper & lower letters
+
+func Shorten(s UrlShortener, original string) (string, error) {
+
+	var shortUrl string
+	var assumeCollision = true
+
+	for assumeCollision {
+		var result strings.Builder
+		var charPos int
+		var charType int
+		for range ShortUrlLength {
+
+			if charType = rand.IntN(3); charType == 0 {
+				charPos = rand.IntN(10)
+			} else {
+				charPos = rand.IntN(26)
+			}
+
+			char := charTypes[charType] + rune(charPos)
+			result.WriteRune(char)
+		}
+
+		shortUrl = result.String()
+		if match, err := s.AddMapping(original, shortUrl); err != nil {
+			return "", err
+		} else if !match {
+			assumeCollision = false
+		}
+	}
+
+	return shortUrl, nil
 }

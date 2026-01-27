@@ -75,7 +75,7 @@ type GlobalLimiter struct {
 	done   chan struct{}
 }
 
-func newLimiter(rate int, store TokenStore) *GlobalLimiter {
+func newGlobalLimiter(rate int, store TokenStore) *GlobalLimiter {
 
 	done := make(chan struct{})
 	limiter := GlobalLimiter{store, rate, done}
@@ -104,7 +104,7 @@ func (l *GlobalLimiter) AddTokens() {
 	}
 }
 
-func NewLimiter(storageType StorageType, count, cap, rate int) (*GlobalLimiter, error) {
+func NewGlobalLimiter(storageType StorageType, count, cap, rate int) (*GlobalLimiter, error) {
 	var limiter *GlobalLimiter
 
 	switch storageType {
@@ -114,7 +114,7 @@ func NewLimiter(storageType StorageType, count, cap, rate int) (*GlobalLimiter, 
 		if err != nil {
 			return nil, err
 		}
-		limiter = newLimiter(rate, bucket)
+		limiter = newGlobalLimiter(rate, bucket)
 	case Redis:
 		return nil, errors.New("Redis storage not yet implemented")
 

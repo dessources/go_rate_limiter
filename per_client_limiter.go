@@ -10,9 +10,8 @@ const ttl = time.Minute * 30
 
 type TimeLogStore interface {
 	Add(key string, window time.Duration) error
-	Remove(key string) error
-	Clean() error
-
+	RemoveClient(key string) error
+	RemoveInactiveClients() error
 	Cap() int
 	Len() int
 }
@@ -29,51 +28,52 @@ func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	//if new client, check global capacity
 	if _, exists := s.logs[k]; exists {
-
-		// remove old
-		//delete entry if all logs old
-		var lastLog time.Time
-		if lastLogIndex := len(s.logs[k]) - 1; lastLogIndex >= 0 {
-			lastLog = s.logs[k][len(s.logs[k])-1]
-			if time.Since(lastLog) >= w {
-				delete(s.logs, k)
-				s.len--
-			} else {
-				//find first log within window and resize slize
-				for i, logTime := range s.logs[k] {
-					if time.Since(logTime) < w {
-						s.logs[k] = s.logs[k][i:]
-
-						break
-					}
-				}
-			}
-		}
+		// if existing client, remove old logs outside window
+		s.RemoveOldLogs(k, w)
 
 	} else {
+		//if new client, check global capacity
 		if s.len >= s.cap {
 			return errors.New("Storage is at capacity.")
 		}
-
+		s.logs[k] = make([]time.Time, 0, s.limit)
+		s.len++
 	}
 
-	// check rate limit
-	if _, exists := s.logs[k]; !exists {
-		s.logs[k] = make([]time.Time, 0)
-		s.len++
-	} else if len(s.logs[k]) >= s.limit {
+	if len(s.logs[k]) >= s.limit {
+		// check rate limit
 		return errors.New("Rate limit exceeded. Please try again later")
 	}
 
-	//add log
+	//add log entry
 	s.logs[k] = append(s.logs[k], time.Now())
 	return nil
-
 }
 
-func (s *InMemoryTimeLogStore) Remove(k string) error {
+func (s *InMemoryTimeLogStore) RemoveOldLogs(k string, w time.Duration) {
+	// remove old
+	//delete entry if all logs old
+	var lastLog time.Time
+	if lastLogIndex := len(s.logs[k]) - 1; lastLogIndex >= 0 {
+		lastLog = s.logs[k][len(s.logs[k])-1]
+		if time.Since(lastLog) >= w {
+			// All logs are old, reset the slice
+			s.logs[k] = s.logs[k][:0]
+		} else {
+			//find first log within window and resize slize
+			for i, logTime := range s.logs[k] {
+				if time.Since(logTime) < w {
+					s.logs[k] = s.logs[k][i:]
+
+					break
+				}
+			}
+		}
+	}
+}
+
+func (s *InMemoryTimeLogStore) RemoveClient(k string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -83,10 +83,9 @@ func (s *InMemoryTimeLogStore) Remove(k string) error {
 	delete(s.logs, k)
 	s.len--
 	return nil
-
 }
 
-func (s *InMemoryTimeLogStore) Clean() error {
+func (s *InMemoryTimeLogStore) RemoveInactiveClients() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	keysToDelete := []string{}
@@ -118,12 +117,12 @@ func (s *InMemoryTimeLogStore) Len() int {
 	return s.len
 }
 
-func (l *PerClientLimiter) RegularlyRemoveOldClients() {
+func (l *PerClientLimiter) RemoveInactiveClientsRoutine() {
 	ticker := time.NewTicker(time.Minute * 30)
 	for {
 		select {
 		case <-ticker.C:
-			l.timeLogStore.Clean()
+			l.timeLogStore.RemoveInactiveClients()
 
 		case <-l.done:
 			ticker.Stop()
@@ -156,7 +155,7 @@ func NewPerClientLimiter(storateType StorageType, cap int, limit int, window tim
 		timeLogStore := &InMemoryTimeLogStore{cap: cap, logs: logs, limit: limit}
 		limiter = PerClientLimiter{timeLogStore, window, done}
 
-		go limiter.RegularlyRemoveOldClients()
+		go limiter.RemoveInactiveClientsRoutine()
 
 		return &limiter, nil
 	case Redis:

@@ -3,69 +3,58 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
-	"time"
 )
 
-func Index(ctx HTTPContext) {
-	ctx.w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(ctx.w, "<h1>URL shortener is running!</h1>\n")
+func Index(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "<h1>URL shortener is running!</h1>\n")
 }
 
-func RetrieveUrl(s UrlShortener, ctx HTTPContext) {
-	short := ctx.req.PathValue("shortUrl")
+type Features struct {
+	shortener UrlShortener
+}
+
+func (f *Features) RetrieveUrl(w http.ResponseWriter, r *http.Request) {
+	short := r.PathValue("shortUrl")
 
 	if short != "" {
-		if original, err := s.RetrieveUrl(short); err != nil {
-			http.Error(ctx.w, err.Error(), http.StatusNotFound)
+		if original, err := f.shortener.RetrieveUrl(short); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			http.Redirect(ctx.w, ctx.req, original, http.StatusTemporaryRedirect)
+			http.Redirect(w, r, original, http.StatusTemporaryRedirect)
 		}
 	} else {
-		http.Error(ctx.w, "Provided short url is empty", http.StatusBadRequest)
+		http.Error(w, "Provided short url is empty", http.StatusBadRequest)
 	}
 
 }
 
-func ShortenUrl(s UrlShortener, ctx HTTPContext) {
+func (f *Features) ShortenUrl(w http.ResponseWriter, r *http.Request) {
 	var payload UrlShortenerPayload
 
-	if err := json.NewDecoder(ctx.req.Body).Decode(&payload); err != nil {
-		http.Error(ctx.w, err.Error(), http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if message, ok := ValidateUrl(payload.Original); !ok {
-		http.Error(ctx.w, message, http.StatusBadRequest)
+		http.Error(w, message, http.StatusBadRequest)
 		return
 	}
 
-	if shortUrl, err := Shorten(s, payload.Original); err != nil {
-		http.Error(ctx.w, err.Error(), http.StatusInternalServerError)
+	if shortUrl, err := Shorten(f.shortener, payload.Original); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	} else {
-		ctx.w.WriteHeader(http.StatusCreated)
-		fmt.Fprintf(ctx.w, "Short URL: %s\n", shortUrl)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, "Short URL: %s\n", shortUrl)
 	}
 
 }
 
-// handler utils
-func createUrlShortener() (UrlShortener, RouteHandler, RouteHandler) {
-	s, err := NewUrlShortener(InMemory, 100000, time.Hour)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return s,
-		func(ctx HTTPContext) {
-			ShortenUrl(s, ctx)
-		},
-		func(ctx HTTPContext) {
-			RetrieveUrl(s, ctx)
-		}
-}
+//------------- handler utils----------------------
 
 func ValidateUrl(s string) (string, bool) {
 	if len(s) > maxUrlLength {
