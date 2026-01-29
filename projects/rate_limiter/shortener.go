@@ -142,7 +142,7 @@ func NewUrlShortener(storageType StorageType, cap int, ttl time.Duration) (UrlSh
 // Shorten functionality definition
 //-------------------------------------------------------------------------
 
-const ShortUrlLength int = 10
+const shortUrlLength int = 4
 
 var charTypes = [3]rune{48, 65, 97} // ascii start value for numbers, upper & lower letters
 
@@ -155,7 +155,7 @@ func Shorten(s UrlShortener, original string) (string, error) {
 		var result strings.Builder
 		var charPos int
 		var charType int
-		for range ShortUrlLength {
+		for range shortUrlLength {
 
 			if charType = rand.IntN(3); charType == 0 {
 				charPos = rand.IntN(10)

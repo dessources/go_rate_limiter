@@ -12,10 +12,6 @@ import (
 
 type Middleware func(http.Handler) http.Handler
 
-type UrlShortenerPayload struct {
-	Original string `json:"original"`
-}
-
 type StorageType int
 
 const (
@@ -23,7 +19,7 @@ const (
 	Redis
 )
 
-const maxUrlLength = 2048
+const maxUrlLength = 4096
 
 func main() {
 
@@ -51,21 +47,22 @@ func main() {
 	//middleware composer
 	withMiddlewares := ComposeMiddlewares(globalRateLimiter, perClientRateLimiter)
 
-	//create features struct with shortener methods
+	//url shortener struct
 	shortener, err := NewUrlShortener(InMemory, 100000, time.Hour)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer shortener.Offline()
 
-	features := &Features{shortener}
+	//create app struct with methods for api handler logic
+	app := &App{shortener}
 
 	//Route handlers
 	mux := http.NewServeMux()
-	mux.Handle("/", globalRateLimiter(http.HandlerFunc(Index)))
-	mux.Handle("GET /s/{shortUrl}", withMiddlewares(http.HandlerFunc(features.RetrieveUrl)))
-	mux.Handle("POST /shorten", withMiddlewares(http.HandlerFunc(features.ShortenUrl)))
-	server.Handler = mux
+	mux.Handle("/", globalRateLimiter(MakeIndexHandler()))
+	mux.Handle("GET /{shortUrl}", globalRateLimiter(http.HandlerFunc(app.RetrieveUrl)))
+	mux.Handle("POST /api/shorten", withMiddlewares(http.HandlerFunc(app.ShortenUrl)))
+	server.Handler = SetupCors(mux)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)

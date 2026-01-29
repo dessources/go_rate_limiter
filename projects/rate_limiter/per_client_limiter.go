@@ -9,8 +9,8 @@ import (
 const ttl = time.Minute * 30
 
 type TimeLogStore interface {
-	Add(key string, window time.Duration) error
-	RemoveClient(key string) error
+	Add(k string, w time.Duration) (bool, error)
+	RemoveClient(k string) error
 	RemoveInactiveClients() error
 	Cap() int
 	Len() int
@@ -24,7 +24,7 @@ type InMemoryTimeLogStore struct {
 	mu    sync.RWMutex
 }
 
-func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
+func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -35,7 +35,7 @@ func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
 	} else {
 		//if new client, check global capacity
 		if s.len >= s.cap {
-			return errors.New("Storage is at capacity.")
+			return true, errors.New("Storage is at capacity.")
 		}
 		s.logs[k] = make([]time.Time, 0, s.limit)
 		s.len++
@@ -43,12 +43,12 @@ func (s *InMemoryTimeLogStore) Add(k string, w time.Duration) error {
 
 	if len(s.logs[k]) >= s.limit {
 		// check rate limit
-		return errors.New("Rate limit exceeded. Please try again later")
+		return false, errors.New("Rate limit exceeded. Please try again later")
 	}
 
 	//add log entry
 	s.logs[k] = append(s.logs[k], time.Now())
-	return nil
+	return false, nil
 }
 
 // RemoveOldLogs assumes caller holds s.mu.Lock()
@@ -135,7 +135,7 @@ type PerClientLimiter struct {
 	done         chan struct{}
 }
 
-func (l *PerClientLimiter) Allow(clientID string) error {
+func (l *PerClientLimiter) Allow(clientID string) (bool, error) {
 	return l.timeLogStore.Add(clientID, l.window)
 }
 

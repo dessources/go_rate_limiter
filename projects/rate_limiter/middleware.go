@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
+
+	"github.com/rs/cors"
 )
 
 func MakeGlobalRateLimitMiddleware() (Middleware, func(), error) {
@@ -17,7 +21,11 @@ func MakeGlobalRateLimitMiddleware() (Middleware, func(), error) {
 			if limiter.Allow(1) {
 				next.ServeHTTP(w, r)
 			} else {
-				http.Error(w, "We're a bit busy right now. Please try again later.", http.StatusTooManyRequests)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+
+				response := ErrorResponse{"We're a bit busy right now. Please try again later."}
+				json.NewEncoder(w).Encode(&response)
 				return
 			}
 		})
@@ -32,23 +40,53 @@ func MakePerClientRateLimitMiddleware() (Middleware, func(), error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			clientId := r.Header.Get("X-API-Key")
+			response := ErrorResponse{ErrorMessage: ""}
+			if r.URL.Path == "/shorten" {
 
-			if clientId == "" {
-				fmt.Println("Invalid API key provided")
-				http.Error(w, "Invalid api key provided", http.StatusUnauthorized)
-				return
+				clientId, _, err := net.SplitHostPort(r.RemoteAddr)
+				if err != nil {
+					clientId = r.RemoteAddr
+				}
+
+				if clientId == "" {
+					fmt.Println("Unable to extract client IP address")
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					response = ErrorResponse{"You are not Authorized to used this site at the moment. Please try again later"}
+
+				} else if storageFull, err := limiter.Allow(clientId); err != nil {
+					var errorMessage string
+					if storageFull {
+						errorMessage = "We are a bit busy right now. Please try again later."
+					} else {
+						errorMessage = "Rate limit exceeded. Please try again later"
+					}
+					response = ErrorResponse{errorMessage}
+					w.WriteHeader(http.StatusTooManyRequests)
+					w.Header().Set("Content-Type", "application/json")
+				}
+
+				if response.ErrorMessage != "" {
+					json.NewEncoder(w).Encode(&response)
+				}
 			}
 
-			if err := limiter.Allow(clientId); err != nil {
-				http.Error(w, err.Error(), http.StatusTooManyRequests)
-				return
-			} else {
-				next.ServeHTTP(w, r)
-				return
-			}
+			next.ServeHTTP(w, r)
 		})
 	}, limiter.Offline, nil
+}
+
+func SetupCors(mux *http.ServeMux) http.Handler {
+
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"https://appurl.com", "http://localhost:8090", "http://localhost:3000"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-API-Key"},
+		AllowCredentials: true,
+		Debug:            false,
+	})
+
+	return c.Handler(mux)
 }
 
 // middleware utils

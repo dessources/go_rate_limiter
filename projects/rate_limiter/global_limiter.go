@@ -115,6 +115,7 @@ func NewGlobalLimiter(storageType StorageType, count, cap, rate int) (*GlobalLim
 			return nil, err
 		}
 		limiter = newGlobalLimiter(rate, bucket)
+
 	case Redis:
 		return nil, errors.New("Redis storage not yet implemented")
 
