@@ -5,6 +5,7 @@ import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { BASE_URL } from "@/lib/utils";
 
 import type { Metrics } from "@/app/page";
+import { glob } from "fs";
 
 export interface LiveMetricsProps {
   metrics: Metrics;
@@ -27,6 +28,9 @@ export default function LiveMetrics({ metrics, setMetrics }: LiveMetricsProps) {
     };
   }, []);
 
+  let rateLoadPercent =
+    (metrics.globalTokensUsed / metrics.globalTokenBucketCap) * 100;
+
   return (
     <div>
       <h2 className="mb-4 text-2xl font-semibold text-foreground">
@@ -42,9 +46,8 @@ export default function LiveMetrics({ metrics, setMetrics }: LiveMetricsProps) {
           </CardHeader>
           <CardContent className="space-y-3">
             <Progress
-              value={
-                (metrics.globalTokensUsed / metrics.globalTokenBucketCap) * 100
-              }
+              value={rateLoadPercent}
+              className={"[&>div]:transition-colors [&>div]:duration-500 "}
             />
             <p className="mt-10 text-center text-sm text-muted-foreground">
               {metrics.globalTokensUsed} requests /{" "}
