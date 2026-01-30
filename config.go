@@ -52,7 +52,7 @@ func LoadConfig() (*Config, error) {
 
 		GlobalLimiterCount: globalCap, // Often the same as cap at start
 		GlobalLimiterCap:   globalCap,
-		GlobalLimiterRate:  getEnvAsInt("GLOBAL_LIMITER_RATE", 10000),
+		GlobalLimiterRate:  getEnvAsInt("GLOBAL_LIMITER_RATE", 10000*60),
 
 		PerClientLimiterCap:    getEnvAsInt("PER_CLIENT_LIMITER_CAP", 50000),
 		PerClientLimiterLimit:  getEnvAsInt("PER_CLIENT_LIMITER_LIMIT", 10),
@@ -84,8 +84,8 @@ type StressTestRouteMiddlewareConfig struct {
 
 func LoadStressTestRouteMiddlewareConfig() *StressTestRouteMiddlewareConfig {
 	return &StressTestRouteMiddlewareConfig{
-		GlobalLimiterCount: getEnvAsInt("STRESS_TEST_GLOBAL_LIMITER_COUNT", 5),
-		GlobalLimiterCap:   getEnvAsInt("STRESS_TEST_GLOBAL_LIMITER_CAP", 5),
+		GlobalLimiterCount: getEnvAsInt("STRESS_TEST_GLOBAL_LIMITER_COUNT", 10),
+		GlobalLimiterCap:   getEnvAsInt("STRESS_TEST_GLOBAL_LIMITER_CAP", 10),
 		GlobalLimiterRate:  getEnvAsInt("STRESS_TEST_GLOBAL_LIMITER_RATE", 1),
 
 		// Per-Client Rate Limiter

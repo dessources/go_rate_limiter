@@ -18,7 +18,6 @@ export default function LiveMetrics({ metrics, setMetrics }: LiveMetricsProps) {
     evtSource.onmessage = ({ isTrusted, data }) => {
       if (isTrusted && data) {
         const parsedData: Metrics = JSON.parse(data);
-        console.log(parsedData);
         if (parsedData) setMetrics({ ...parsedData });
       }
     };

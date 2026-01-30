@@ -60,6 +60,8 @@ export default function StressTest() {
         evtSource.close();
       });
 
+      evtSource.onerror = (e) => console.log(e);
+
       evtSource.addEventListener("done", (e) => {
         const { data } = e as MessageEvent;
         if (data) {
@@ -73,6 +75,7 @@ export default function StressTest() {
       console.log("i did this: ", error);
     }
   };
+
   const handleReset = () => {
     if (testIsRunning && evtSource) {
       evtSource.close();
@@ -84,6 +87,7 @@ export default function StressTest() {
 
   const testIsRunning = stressTestStatus == StressTestStatus.RUNNING;
   const testIsReady = stressTestStatus == StressTestStatus.READY;
+  const testIsDone = stressTestStatus == StressTestStatus.DONE;
 
   return (
     <div>
@@ -96,7 +100,7 @@ export default function StressTest() {
             <Button
               variant={testIsRunning ? "secondary" : "destructive"}
               onClick={handleStressTest}
-              disabled={testIsRunning}
+              disabled={testIsRunning || testIsDone}
               className="mr-2 "
             >
               {testIsRunning ? (
@@ -140,11 +144,11 @@ export default function StressTest() {
               </CardHeader>
               <CardContent>
                 {error ? (
-                  <pre className="max-h-50  overflow-auto font-mono text-xs text-red-400/90">
+                  <pre className="max-h-50   overflow-auto font-mono text-xs text-green-400/90 scrollbar-thin scrollbar-track-black/30 scrollbar-thumb-green-500/50 hover:scrollbar-thumb-green-500/70 text-red-400/90">
                     {error + "\n\n\n\n\n\n\n"}
                   </pre>
                 ) : (
-                  <pre className="min-h-35 max-h-130  overflow-auto font-mono text-xs text-green-400/90">
+                  <pre className="min-h-35 max-h-130  overflow-auto font-mono text-xs text-green-400/90 scrollbar-thin scrollbar-track-black/30 scrollbar-thumb-green-500/50 hover:scrollbar-thumb-green-500/70">
                     {stressTestOutput + "\n\n\n\n\n\n\n"}
                   </pre>
                 )}

@@ -73,7 +73,7 @@ func (b *MemoryBucket) Cap() int {
 // ----------------Limiter definition-----------
 type GlobalRateLimiter struct {
 	bucket TokenStore
-	rate   int //token refill rate per second
+	rate   int //token refill rate per minute
 	done   chan struct{}
 }
 
@@ -94,7 +94,7 @@ func (l *GlobalRateLimiter) Offline() {
 }
 
 func (l *GlobalRateLimiter) AddTokens() {
-	ticker := time.NewTicker(time.Second / time.Duration(l.rate))
+	ticker := time.NewTicker(time.Minute / time.Duration(l.rate))
 	for {
 		select {
 		case <-ticker.C:
