@@ -27,21 +27,27 @@ func main() {
 	EnableGracefulShutdown(idleConnsClosed, server)
 
 	//create global limiter & middleware
-	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware()
+	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware(InMemory, 50000, 50000, 10000)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer globalRateLimiter.Offline()
 
 	//create per client limiter & middleware
-	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware()
+	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware(InMemory, 50000, 10, time.Minute)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer perClientRateLimiter.Offline()
 
-	//middleware composer
+	//middleware composers
 	withMiddlewares := ComposeMiddlewares(rateLimitGlobally, rateLimitPerClient)
+	//composed middleware for stress test route
+	stressTestMiddlewares, cleanup, err := MakeTestRouteMiddlewares()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cleanup()
 
 	//url shortener struct
 	shortener, err := NewUrlShortener(InMemory, 100000, time.Hour)
@@ -59,7 +65,7 @@ func main() {
 	mux.Handle("GET /{shortUrl}", rateLimitGlobally(http.HandlerFunc(app.RetrieveUrl)))
 	mux.Handle("POST /api/shorten", withMiddlewares(http.HandlerFunc(app.ShortenUrl)))
 	mux.Handle("GET /api/metrics/stream", rateLimitGlobally(http.HandlerFunc(app.StreamMetrics)))
-	mux.HandleFunc("GET /api/stress-test/stream", StressTest)
+	mux.Handle("GET /api/stress-test/stream", stressTestMiddlewares(http.HandlerFunc(StressTest)))
 	server.Handler = SetupCors(mux)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {

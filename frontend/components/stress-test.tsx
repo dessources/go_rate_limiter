@@ -1,8 +1,9 @@
-import { Loader2, Loader, Play, Trash, StopCircle } from "lucide-react";
+import { Loader, Play, Trash, StopCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useEffect, useState } from "react";
 import { BASE_URL } from "@/lib/utils";
+import { EventSourcePolyfill } from "event-source-polyfill";
 
 enum StressTestStatus {
   DONE,
@@ -28,32 +29,51 @@ export default function StressTest() {
     setError("");
     setStressTestOutput("Initializing stress test...\n");
 
-    const evtSource = new EventSource(`${BASE_URL}/api/stress-test/stream`);
-    setEvtSource(evtSource);
+    try {
+      const evtSource = new EventSourcePolyfill(
+        `${BASE_URL}/api/stress-test/stream`,
+        {
+          headers: {
+            "X-API-KEY": "Some-random_key",
+          },
+        },
+      );
+      setEvtSource(evtSource);
 
-    evtSource.onmessage = (e) => {
-      if (e.isTrusted && e.data) {
-        const parsedData = JSON.parse(e.data);
-        if (parsedData.error) {
-          setError(parsedData.error);
-          evtSource.close();
-          setStressTestStatus(StressTestStatus.DONE);
-        } else {
+      evtSource.onmessage = (e) => {
+        if (e.data) {
+          const parsedData = JSON.parse(e.data);
+          if (parsedData.error) {
+            setError(parsedData.error);
+            evtSource.close();
+            setStressTestStatus(StressTestStatus.DONE);
+          } else {
+            setStressTestOutput((prev) => prev + "\n" + parsedData.outputLine);
+          }
+        }
+      };
+
+      evtSource.addEventListener("error", () => {
+        setError(
+          "Rate limit for stress test feature reached or connection may have failed. Try again in a minute.",
+        );
+        setStressTestStatus(StressTestStatus.READY);
+        evtSource.close();
+      });
+
+      evtSource.addEventListener("done", (e) => {
+        const { data } = e as MessageEvent;
+        if (data) {
+          const parsedData = JSON.parse(data);
           setStressTestOutput((prev) => prev + "\n" + parsedData.outputLine);
         }
-      }
-    };
-
-    evtSource.addEventListener("done", (e) => {
-      if (e.isTrusted && e.data) {
-        const parsedData = JSON.parse(e.data);
-        setStressTestOutput((prev) => prev + "\n" + parsedData.outputLine);
-      }
-      setStressTestStatus(StressTestStatus.DONE);
-      evtSource.close();
-    });
+        setStressTestStatus(StressTestStatus.DONE);
+        evtSource.close();
+      });
+    } catch (error) {
+      console.log("i did this: ", error);
+    }
   };
-
   const handleReset = () => {
     if (stressTestStatus && evtSource) {
       evtSource.close();
@@ -122,7 +142,7 @@ export default function StressTest() {
               <CardContent>
                 {error ? (
                   <pre className="max-h-50  overflow-auto font-mono text-xs text-red-400/90">
-                    {error}
+                    {error + "\n\n\n\n\n\n\n"}
                   </pre>
                 ) : (
                   <pre className="min-h-35 max-h-130  overflow-auto font-mono text-xs text-green-400/90">

@@ -8,8 +8,10 @@ import (
 	"time"
 )
 
-func MakeGlobalRateLimitMiddleware() (Middleware, *GlobalRateLimiter, error) {
-	limiter, err := NewGlobalRateLimiter(InMemory, 50000, 50000, 10000)
+var routesLimitedPerClient []string = []string{"/api/shorten", "/api/stress-test/stream"}
+
+func MakeGlobalRateLimitMiddleware(storageType StorageType, count int, cap int, rate int) (Middleware, *GlobalRateLimiter, error) {
+	limiter, err := NewGlobalRateLimiter(storageType, count, cap, rate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -28,8 +30,8 @@ func MakeGlobalRateLimitMiddleware() (Middleware, *GlobalRateLimiter, error) {
 	}, limiter, nil
 }
 
-func MakePerClientRateLimitMiddleware() (Middleware, *PerClientRateLimiter, error) {
-	limiter, err := NewPerClientRateLimiter(InMemory, 50000, 10, time.Minute)
+func MakePerClientRateLimitMiddleware(storateType StorageType, cap int, limit int, window time.Duration) (Middleware, *PerClientRateLimiter, error) {
+	limiter, err := NewPerClientRateLimiter(storateType, cap, limit, window)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -39,38 +41,40 @@ func MakePerClientRateLimitMiddleware() (Middleware, *PerClientRateLimiter, erro
 			errorMessage := "An unknown error occured"
 
 			//TODO: Clients should be identifed by combination of IP and API key
-
-			if r.URL.Path == "/api/shorten" {
-				ip, _, err := net.SplitHostPort(r.RemoteAddr)
-				if err != nil {
-					ip = r.RemoteAddr
-				}
-
-				apiKey := r.Header.Get("X-API-Key")
-				if apiKey == "" {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnauthorized)
-					errorMessage = "Invalid API key provided."
-					json.NewEncoder(w).Encode(&ErrorResponse{errorMessage})
-					return
-				}
-
-				clientId := fmt.Sprintf("%s:%s", ip, apiKey)
-
-				if storageFull, err := limiter.Allow(clientId); err != nil {
-
-					if storageFull {
-						errorMessage = "We are a bit busy right now. Please try again later."
-					} else {
-						errorMessage = "Rate limit exceeded. Please try again later"
+			for _, route := range routesLimitedPerClient {
+				if r.URL.Path == route {
+					ip, _, err := net.SplitHostPort(r.RemoteAddr)
+					if err != nil {
+						ip = r.RemoteAddr
 					}
 
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusTooManyRequests)
-					json.NewEncoder(w).Encode(&ErrorResponse{errorMessage})
-					return
-				}
+					apiKey := r.Header.Get("X-API-Key")
+					if apiKey == "" {
+						fmt.Println("Invalid API key provided")
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusUnauthorized)
+						errorMessage = "Invalid API key provided."
+						json.NewEncoder(w).Encode(&ErrorResponse{errorMessage})
+						return
+					}
 
+					clientId := fmt.Sprintf("%s:%s", ip, apiKey)
+
+					if storageFull, err := limiter.Allow(clientId); err != nil {
+
+						if storageFull {
+							errorMessage = "We are a bit busy right now. Please try again later."
+						} else {
+							errorMessage = "Rate limit exceeded. Please try again later"
+						}
+
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusTooManyRequests)
+						json.NewEncoder(w).Encode(&ErrorResponse{errorMessage})
+						return
+					}
+
+				}
 			}
 
 			next.ServeHTTP(w, r)

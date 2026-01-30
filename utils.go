@@ -120,13 +120,13 @@ func StartTestServer() (*http.Server, *App, error) {
 	testServer := &http.Server{Addr: ":8091"}
 
 	//create global limiter & middleware
-	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware()
+	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware(InMemory, 50000, 50000, 10000)
 	if err != nil {
 		return nil, nil, errors.New("Failed to create global rate limiter for stress test.")
 	}
 
 	//create per client limiter & middleware
-	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware()
+	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware(InMemory, 50000, 10, time.Minute)
 	if err != nil {
 		globalRateLimiter.Offline()
 		return nil, nil, errors.New("Failed to create per client rate limiter for stress test.")
@@ -157,4 +157,26 @@ func StartTestServer() (*http.Server, *App, error) {
 
 }
 
-// func
+func MakeTestRouteMiddlewares() (Middleware, func(), error) {
+
+	//create global limiter & middleware
+	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware(InMemory, 5, 5, 1)
+	if err != nil {
+		return nil, nil, errors.New("Failed to create global rate limiter for stress test route.")
+	}
+
+	//create per client limiter & middleware
+	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware(InMemory, 50, 1, time.Minute)
+
+	if err != nil {
+		globalRateLimiter.Offline()
+		return nil, nil, errors.New("Failed to create per client rate limiter for stress test route.")
+	}
+
+	//middleware composer
+	return ComposeMiddlewares(rateLimitGlobally, rateLimitPerClient), func() {
+		globalRateLimiter.Offline()
+		perClientRateLimiter.Offline()
+	}, nil
+
+}
