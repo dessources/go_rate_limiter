@@ -39,12 +39,11 @@ func MakeIndexHandler() http.Handler {
 type App struct {
 	cfg                  *Config
 	logger               *slog.Logger
+	page404HTMLText      string
 	shortener            UrlShortener
 	globalRateLimiter    *GlobalRateLimiter
 	perClientRateLimiter *PerClientRateLimiter
 }
-
-var page404HTMLText = Load404Page()
 
 func (app *App) RetrieveUrl(w http.ResponseWriter, r *http.Request) {
 	short := r.PathValue("shortUrl")
@@ -55,8 +54,8 @@ func (app *App) RetrieveUrl(w http.ResponseWriter, r *http.Request) {
 			app.logger.Info("short URL not found", "short_url", short, "error", err)
 			w.Header().Add("Content-Type", "text/html")
 			w.WriteHeader(http.StatusNotFound)
-			if page404HTMLText != "" {
-				fmt.Fprintf(w, "%s", page404HTMLText)
+			if app.page404HTMLText != "" {
+				fmt.Fprintf(w, "%s", app.page404HTMLText)
 			} else {
 				fmt.Fprintf(w, app.cfg.Fallback404HTML)
 			}
@@ -175,7 +174,7 @@ func (app *App) StressTest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.Header().Add("Connection", "keep-alive")
 
-	if testServer, testApp, err := StartTestServer(app.cfg); err != nil {
+	if testServer, testApp, err := StartTestServer(app); err != nil {
 		app.logger.Error("failed to start test server", "error", err)
 		SendSSEErrorEvent(w, "Failed to start test server. Please try again later.", flusher)
 		return

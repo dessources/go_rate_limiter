@@ -16,7 +16,9 @@ const (
 )
 
 func main() {
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		logger.Error("failed to load configuration", "error", err)
@@ -27,7 +29,7 @@ func main() {
 	}
 
 	idleConnsClosed := make(chan struct{})
-	EnableGracefulShutdown(idleConnsClosed, server)
+	EnableGracefulShutdown(logger, idleConnsClosed, server)
 
 	//create global limiter & middleware
 	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware(logger, InMemory, cfg.GlobalLimiterCount, cfg.GlobalLimiterCap, cfg.GlobalLimiterRate)
@@ -49,12 +51,17 @@ func main() {
 	//middleware composers
 	withMiddlewares := ComposeMiddlewares(rateLimitGlobally, rateLimitPerClient)
 	//composed middleware for stress test route
-	stressTestMiddlewares, cleanup, err := MakeStressTestRouteMiddlewares()
+	stressTestMiddlewares, cleanup, err := MakeStressTestRouteMiddlewares(logger)
 	if err != nil {
 		logger.Error("failed to create stress test route middlewares", "error", err)
 		return
 	}
 	defer cleanup()
+
+	page404HTML, err := Load404Page()
+	if err != nil {
+		logger.Warn("could not load custom 404 page, will use fallback", "error", err)
+	}
 
 	//url shortener struct
 	shortener, err := NewUrlShortener(InMemory, cfg.ShortenerCap, cfg.ShortenerTTL, cfg.ShortCodeLength)
@@ -65,7 +72,7 @@ func main() {
 	defer shortener.Offline()
 
 	//create app struct with methods for api handler logic
-	app := &App{cfg, logger, shortener, globalRateLimiter, perClientRateLimiter}
+	app := &App{cfg, logger, page404HTML, shortener, globalRateLimiter, perClientRateLimiter}
 
 	//Route handlers
 	mux := http.NewServeMux()
