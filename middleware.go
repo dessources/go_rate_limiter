@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func MakeGlobalRateLimitMiddleware() (Middleware, *GlobalLimiter, error) {
-	limiter, err := NewGlobalLimiter(InMemory, 50000, 50000, 10000)
+func MakeGlobalRateLimitMiddleware() (Middleware, *GlobalRateLimiter, error) {
+	limiter, err := NewGlobalRateLimiter(InMemory, 50000, 50000, 10000)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -28,8 +28,8 @@ func MakeGlobalRateLimitMiddleware() (Middleware, *GlobalLimiter, error) {
 	}, limiter, nil
 }
 
-func MakePerClientRateLimitMiddleware() (Middleware, *PerClientLimiter, error) {
-	limiter, err := NewPerClientLimiter(InMemory, 50000, 10, time.Minute)
+func MakePerClientRateLimitMiddleware() (Middleware, *PerClientRateLimiter, error) {
+	limiter, err := NewPerClientRateLimiter(InMemory, 50000, 10, time.Minute)
 	if err != nil {
 		return nil, nil, err
 	}

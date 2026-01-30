@@ -115,7 +115,7 @@ func (s *InMemoryTimeLogStore) Len() int {
 	return s.len
 }
 
-func (l *PerClientLimiter) RemoveInactiveClientsRoutine() {
+func (l *PerClientRateLimiter) RemoveInactiveClientsRoutine() {
 	ticker := time.NewTicker(time.Minute * 30)
 	for {
 		select {
@@ -129,29 +129,29 @@ func (l *PerClientLimiter) RemoveInactiveClientsRoutine() {
 	}
 }
 
-type PerClientLimiter struct {
+type PerClientRateLimiter struct {
 	timeLogStore TimeLogStore
 	window       time.Duration
 	done         chan struct{}
 }
 
-func (l *PerClientLimiter) Allow(clientID string) (bool, error) {
+func (l *PerClientRateLimiter) Allow(clientID string) (bool, error) {
 	return l.timeLogStore.Add(clientID, l.window)
 }
 
-func (l *PerClientLimiter) Offline() {
+func (l *PerClientRateLimiter) Offline() {
 	close(l.done)
 }
 
-func NewPerClientLimiter(storateType StorageType, cap int, limit int, window time.Duration) (*PerClientLimiter, error) {
+func NewPerClientRateLimiter(storateType StorageType, cap int, limit int, window time.Duration) (*PerClientRateLimiter, error) {
 
-	var limiter PerClientLimiter
+	var limiter PerClientRateLimiter
 	switch storateType {
 	case InMemory:
 		logs := make(map[string][]time.Time)
 		done := make(chan struct{})
 		timeLogStore := &InMemoryTimeLogStore{cap: cap, logs: logs, limit: limit}
-		limiter = PerClientLimiter{timeLogStore, window, done}
+		limiter = PerClientRateLimiter{timeLogStore, window, done}
 
 		go limiter.RemoveInactiveClientsRoutine()
 

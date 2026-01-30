@@ -71,29 +71,29 @@ func (b *MemoryBucket) Cap() int {
 }
 
 // ----------------Limiter definition-----------
-type GlobalLimiter struct {
+type GlobalRateLimiter struct {
 	bucket TokenStore
 	rate   int //token refill rate per second
 	done   chan struct{}
 }
 
-func newGlobalLimiter(rate int, store TokenStore) *GlobalLimiter {
+func newGlobalRateLimiter(rate int, store TokenStore) *GlobalRateLimiter {
 
 	done := make(chan struct{})
-	limiter := GlobalLimiter{store, rate, done}
+	limiter := GlobalRateLimiter{store, rate, done}
 	go limiter.AddTokens()
 	return &limiter
 }
 
-func (l *GlobalLimiter) Allow(size int) bool {
+func (l *GlobalRateLimiter) Allow(size int) bool {
 	return l.bucket.Debit(size)
 }
 
-func (l *GlobalLimiter) Offline() {
+func (l *GlobalRateLimiter) Offline() {
 	close(l.done)
 }
 
-func (l *GlobalLimiter) AddTokens() {
+func (l *GlobalRateLimiter) AddTokens() {
 	ticker := time.NewTicker(time.Second / time.Duration(l.rate))
 	for {
 		select {
@@ -106,8 +106,8 @@ func (l *GlobalLimiter) AddTokens() {
 	}
 }
 
-func NewGlobalLimiter(storageType StorageType, count, cap, rate int) (*GlobalLimiter, error) {
-	var limiter *GlobalLimiter
+func NewGlobalRateLimiter(storageType StorageType, count, cap, rate int) (*GlobalRateLimiter, error) {
+	var limiter *GlobalRateLimiter
 
 	switch storageType {
 	case InMemory:
@@ -116,7 +116,7 @@ func NewGlobalLimiter(storageType StorageType, count, cap, rate int) (*GlobalLim
 		if err != nil {
 			return nil, err
 		}
-		limiter = newGlobalLimiter(rate, bucket)
+		limiter = newGlobalRateLimiter(rate, bucket)
 
 	case Redis:
 		return nil, errors.New("Redis storage not yet implemented")

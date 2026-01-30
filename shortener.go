@@ -130,6 +130,7 @@ func NewUrlShortener(storageType StorageType, cap int, ttl time.Duration) (UrlSh
 
 		// reset mappings every hour
 		go urlShortener.RegularlyResetMappings()
+
 		return urlShortener, nil
 	case Redis:
 		return nil, errors.New("Redis storage not yet implemented")

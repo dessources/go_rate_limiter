@@ -1,11 +1,18 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/rs/cors"
 )
@@ -15,7 +22,7 @@ import (
 func SetupCors(mux *http.ServeMux) http.Handler {
 
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"https://appurl.com", "http://localhost:8090", "http://localhost:3000"},
+		AllowedOrigins:   []string{"https://pety.to", "http://localhost:8090", "http://localhost:3000"},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-API-Key"},
 		AllowCredentials: true,
@@ -87,4 +94,63 @@ func ValidateUrl(s string) (string, bool) {
 	}
 
 	return "", true
+}
+
+func EnableGracefulShutdown(done chan struct{}, server *http.Server) {
+
+	// enable Graceful Exit
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
+		<-sigint
+
+		//when interrupt received
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("HTTP server Shutdown: %v", err)
+		}
+		close(done)
+	}()
+
+}
+
+func StartTestServer() (*http.Server, *App, error) {
+
+	testServer := &http.Server{Addr: ":8091"}
+
+	//create global limiter & middleware
+	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware()
+	if err != nil {
+		return nil, nil, errors.New("")
+	}
+	defer globalRateLimiter.Offline()
+
+	//create per client limiter & middleware
+	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware()
+	if err != nil {
+		return nil, nil, errors.New("")
+	}
+
+	//middleware composer
+	withMiddlewares := ComposeMiddlewares(rateLimitGlobally, rateLimitPerClient)
+
+	//url shortener struct
+	shortener, err := NewUrlShortener(InMemory, 100000, time.Hour)
+	if err != nil {
+		return nil, nil, errors.New("")
+	}
+
+	app := &App{shortener, globalRateLimiter, perClientRateLimiter}
+
+	//Route handlers
+	mux := http.NewServeMux()
+	mux.Handle("/", rateLimitGlobally(MakeIndexHandler()))
+	mux.Handle("GET /{shortUrl}", rateLimitGlobally(http.HandlerFunc(app.RetrieveUrl)))
+	mux.Handle("POST /api/shorten", withMiddlewares(http.HandlerFunc(app.ShortenUrl)))
+	// mux.Handle("GET /api/metrics/stream", rateLimitGlobally(http.HandlerFunc(app.StreamMetrics)))
+	testServer.Handler = SetupCors(mux)
+
+	return testServer, app, nil
+
 }

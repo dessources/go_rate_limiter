@@ -3,16 +3,13 @@
 # Rate Limiter Stress Test Suite
 # Tests global rate limiting (token bucket) and per-client limiting (sliding window)
 
-PORT=8090
+PORT=${1:-8091}
+
 BASE_URL="http://localhost:$PORT"
 
-# Start server
-go run . &
-PID=$!
-sleep 3
-SERVER_PID=$(lsof -t -i :$PORT)
 
 echo "=== Rate Limiter Stress Test Suite ==="
+echo "Targeting : $BASE_URL"
 echo ""
 
 # ============================================
@@ -130,9 +127,4 @@ echo ""
 # Cleanup
 # ============================================
 echo "=== Tests Complete ==="
-echo "Shutting down server..."
-kill $SERVER_PID 2>/dev/null
-wait $SERVER_PID 2>/dev/null
-kill $PID 2>/dev/null
-wait $PID 2>/dev/null
 echo "Done."

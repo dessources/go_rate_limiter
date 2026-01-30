@@ -1,12 +1,8 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -28,14 +24,14 @@ func main() {
 	}
 
 	idleConnsClosed := make(chan struct{})
-	enableGracefulShutdown(idleConnsClosed, server)
+	EnableGracefulShutdown(idleConnsClosed, server)
 
 	//create global limiter & middleware
-	rateLimitGlobally, globalLimiter, err := MakeGlobalRateLimitMiddleware()
+	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer globalLimiter.Offline()
+	defer globalRateLimiter.Offline()
 
 	//create per client limiter & middleware
 	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware()
@@ -55,7 +51,7 @@ func main() {
 	defer shortener.Offline()
 
 	//create app struct with methods for api handler logic
-	app := &App{shortener, globalLimiter, perClientRateLimiter}
+	app := &App{shortener, globalRateLimiter, perClientRateLimiter}
 
 	//Route handlers
 	mux := http.NewServeMux()
@@ -71,24 +67,5 @@ func main() {
 
 	//wait for graceful shutdown
 	<-idleConnsClosed
-
-}
-
-func enableGracefulShutdown(done chan struct{}, server *http.Server) {
-
-	// enable Graceful Exit
-	go func() {
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
-		<-sigint
-
-		//when interrupt received
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("HTTP server Shutdown: %v", err)
-		}
-		close(done)
-	}()
 
 }

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"time"
 )
 
@@ -33,9 +35,9 @@ func MakeIndexHandler() http.Handler {
 //------- shortener routes ------------------------
 
 type App struct {
-	shortener        UrlShortener
-	globalLimiter    *GlobalLimiter
-	perClientLimiter *PerClientLimiter
+	shortener            UrlShortener
+	globalRateLimiter    *GlobalRateLimiter
+	perClientRateLimiter *PerClientRateLimiter
 }
 
 func (app *App) RetrieveUrl(w http.ResponseWriter, r *http.Request) {
@@ -116,9 +118,9 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-metricsTicker.C:
-			globalTokenBucketCap := app.globalLimiter.bucket.Cap()
-			globalTokensUsed := globalTokenBucketCap - app.globalLimiter.bucket.Len()
-			activeUsers := app.perClientLimiter.timeLogStore.Len()
+			globalTokenBucketCap := app.globalRateLimiter.bucket.Cap()
+			globalTokensUsed := globalTokenBucketCap - app.globalRateLimiter.bucket.Len()
+			activeUsers := app.perClientRateLimiter.timeLogStore.Len()
 			currentUrlCount := app.shortener.Len()
 
 			jsonData, err := json.Marshal(&Metrics{globalTokenBucketCap, globalTokensUsed, activeUsers, currentUrlCount})
@@ -135,6 +137,97 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 
 		case <-r.Context().Done():
 			fmt.Println("Client closed connection. Stopping Metrics stream.")
+			return
+		}
+	}
+
+}
+
+func StressTest(w http.ResponseWriter, r *http.Request) {
+
+	w.Header().Add("Content-Type", "text/event-stream")
+	w.Header().Add("Cache-Control", "no-cache")
+	w.Header().Add("Connection", "keep-alive")
+
+	if testServer, app, err := StartTestServer(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(&ErrorResponse{"Failed to start test server. Please try again later."})
+		return
+	} else {
+
+		defer app.shortener.Offline()
+		defer app.perClientRateLimiter.Offline()
+		defer app.globalRateLimiter.Offline()
+
+		// idleConsClosed := make(chan struct{})
+
+		// EnableGracefulShutdown(idleConsClosed, testServer)
+
+		serverStopUnexpected := make(chan struct{})
+
+		go func() {
+			if err := testServer.ListenAndServe(); err != http.ErrServerClosed {
+				close(serverStopUnexpected)
+			}
+		}()
+
+		testCommand := exec.Command("./production_stress_test.sh")
+		stdout, err := testCommand.StdoutPipe()
+		if err != nil {
+			fmt.Println(err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&ErrorResponse{"Failed to start test script. Please try again later."})
+			return
+		}
+
+		testCommand.Stderr = testCommand.Stdout
+
+		if err := testCommand.Start(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&ErrorResponse{"Failed to start test script. Please try again later."})
+			return
+		}
+
+		scanner := bufio.NewScanner(stdout)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
+			return
+		}
+
+		for scanner.Scan() {
+			select {
+
+			case <-r.Context().Done():
+				fmt.Println("Client closed connection. Stopping Metrics stream.")
+				return
+
+			default:
+				jsonData, err := json.Marshal(map[string]string{"outputLine": scanner.Text()})
+				if err != nil {
+					// testServer.Shutdown(context.TODO)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
+					return
+				}
+
+				fmt.Fprintf(w, "data: %s\n\n", jsonData)
+				flusher.Flush()
+			}
+
+		}
+
+		if err := testCommand.Wait(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
 			return
 		}
 	}
