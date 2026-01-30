@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"time"
@@ -37,6 +38,7 @@ func MakeIndexHandler() http.Handler {
 
 type App struct {
 	cfg                  *Config
+	logger               *slog.Logger
 	shortener            UrlShortener
 	globalRateLimiter    *GlobalRateLimiter
 	perClientRateLimiter *PerClientRateLimiter
@@ -48,8 +50,9 @@ func (app *App) RetrieveUrl(w http.ResponseWriter, r *http.Request) {
 	short := r.PathValue("shortUrl")
 
 	if short != "" {
-		if original, err := app.shortener.RetrieveUrl(short); err != nil {
-
+		original, err := app.shortener.RetrieveUrl(short)
+		if err != nil {
+			app.logger.Info("short URL not found", "short_url", short, "error", err)
 			w.Header().Add("Content-Type", "text/html")
 			w.WriteHeader(http.StatusNotFound)
 			if page404HTMLText != "" {
@@ -57,11 +60,12 @@ func (app *App) RetrieveUrl(w http.ResponseWriter, r *http.Request) {
 			} else {
 				fmt.Fprintf(w, app.cfg.Fallback404HTML)
 			}
-
 		} else {
+			app.logger.Info("redirecting short URL", "short_url", short, "original_url", original)
 			http.Redirect(w, r, original, http.StatusTemporaryRedirect)
 		}
 	} else {
+		app.logger.Info("redirecting root to homepage")
 		http.Redirect(w, r, "/", http.StatusPermanentRedirect)
 	}
 
@@ -72,25 +76,26 @@ func (app *App) ShortenUrl(w http.ResponseWriter, r *http.Request) {
 	errorMessage := ""
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		app.logger.Warn("bad request: failed to decode URL shorten payload", "error", err)
 		w.WriteHeader(http.StatusBadRequest)
 		errorMessage = "Oops, we couldn't process your request. Please try again later."
 		json.NewEncoder(w).Encode(&ErrorResponse{errorMessage})
 		return
-
 	} else if message, ok := ValidateUrl(payload.Original, app.cfg); !ok {
+		app.logger.Warn("bad request: invalid URL", "url", payload.Original, "validation_message", message)
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(&ErrorResponse{message})
 		return
 	} else {
-
 		shortUrl, err := Shorten(app.shortener, payload.Original)
 		if err != nil {
+			app.logger.Error("failed to shorten URL", "original_url", payload.Original, "error", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			errorMessage = "Something broke on our end. Please try again later."
 			json.NewEncoder(w).Encode(&ErrorResponse{errorMessage})
 			return
 		} else {
-
+			app.logger.Info("URL shortened successfully", "original_url", payload.Original, "short_url", shortUrl)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 
@@ -104,9 +109,12 @@ func (app *App) ShortenUrl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
+	app.logger.Info("client connected to metrics stream", "remote_addr", r.RemoteAddr)
+	defer app.logger.Info("client disconnected from metrics stream", "remote_addr", r.RemoteAddr)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		app.logger.Error("metrics streaming unsupported: http.Flusher not implemented", "remote_addr", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(&ErrorResponse{"Metrics Streaming is currently unsupported."})
@@ -131,10 +139,10 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 
 			jsonData, err := json.Marshal(&Metrics{globalTokenBucketCap, globalTokensUsed, activeUsers, currentUrlCount})
 			if err != nil {
+				app.logger.Error("failed to marshal metrics data", "error", err)
 				errorCount++
 				if errorCount > 2 {
 					SendSSEErrorEvent(w, "Metrics Streaming is currently unavailable.", flusher)
-
 					return
 				}
 			}
@@ -143,7 +151,7 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 
 		case <-r.Context().Done():
-			fmt.Println("Client closed connection. Stopping Metrics stream.")
+			// The defer already logs disconnection
 			return
 		}
 	}
@@ -151,8 +159,12 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *App) StressTest(w http.ResponseWriter, r *http.Request) {
+	app.logger.Info("client connected to stress test stream", "remote_addr", r.RemoteAddr)
+	defer app.logger.Info("client disconnected from stress test stream", "remote_addr", r.RemoteAddr)
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		app.logger.Error("stress test streaming unsupported: http.Flusher not implemented", "remote_addr", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
@@ -163,21 +175,22 @@ func (app *App) StressTest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Cache-Control", "no-cache")
 	w.Header().Add("Connection", "keep-alive")
 
-	if testServer, app, err := StartTestServer(app.cfg); err != nil {
-		//TODO log server start failure error message
+	if testServer, testApp, err := StartTestServer(app.cfg); err != nil {
+		app.logger.Error("failed to start test server", "error", err)
 		SendSSEErrorEvent(w, "Failed to start test server. Please try again later.", flusher)
-
 		return
 	} else {
-		defer app.shortener.Offline()
-		defer app.perClientRateLimiter.Offline()
-		defer app.globalRateLimiter.Offline()
+		defer testApp.shortener.Offline()
+		defer testApp.perClientRateLimiter.Offline()
+		defer testApp.globalRateLimiter.Offline()
 		defer testServer.Shutdown(context.Background())
 
 		serverStopUnexpected := make(chan struct{})
 
 		go func() {
+			app.logger.Info("test server started", "addr", app.cfg.TestServerAddr)
 			if err := testServer.ListenAndServe(); err != http.ErrServerClosed {
+				app.logger.Error("test server stopped unexpectedly", "error", err)
 				close(serverStopUnexpected)
 			}
 		}()
@@ -185,16 +198,16 @@ func (app *App) StressTest(w http.ResponseWriter, r *http.Request) {
 		testCommand := exec.Command("./production_stress_test.sh")
 		stdout, err := testCommand.StdoutPipe()
 		if err != nil {
-			fmt.Println(err)
+			app.logger.Error("failed to get stdout pipe for stress test command", "error", err)
 			SendSSEErrorEvent(w, "Unexpected error occured while running tests. Please try again later.", flusher)
 			return
 		}
 
 		testCommand.Stderr = testCommand.Stdout
 
+		app.logger.Info("starting stress test command", "command", testCommand.Args)
 		if err := testCommand.Start(); err != nil {
-			fmt.Println(err)
-
+			app.logger.Error("failed to start stress test command", "error", err)
 			SendSSEErrorEvent(w, "Unexpected error occured while running tests. Please try again later.", flusher)
 			return
 		}
@@ -203,47 +216,42 @@ func (app *App) StressTest(w http.ResponseWriter, r *http.Request) {
 
 		for scanner.Scan() {
 			select {
-
 			case <-r.Context().Done():
-				fmt.Println("Client closed connection. Killing test...")
+				app.logger.Warn("client disconnected during stress test, killing test process", "remote_addr", r.RemoteAddr)
 				testCommand.Process.Kill()
 				return
-
 			case <-serverStopUnexpected:
-				fmt.Println("Test Server stopped unexpectedly")
-
+				app.logger.Error("test server stopped unexpectedly during stress test", "remote_addr", r.RemoteAddr)
 				SendSSEErrorEvent(w, "Test server stoped unexpectedly. Please try again later.", flusher)
 				testCommand.Process.Kill()
 				return
-
 			default:
 				jsonData, err := json.Marshal(map[string]string{"outputLine": scanner.Text()})
 				if err != nil {
+					app.logger.Error("failed to marshal stress test output line", "error", err)
 					SendSSEErrorEvent(w, "Unexpected error occured while reading test output. Please try again later.", flusher)
 					return
 				}
-
 				fmt.Fprintf(w, "data: %s\n\n", jsonData)
 				flusher.Flush()
 			}
 		}
 
 		if err := scanner.Err(); err != nil {
-			fmt.Println("Test Server stopped unexpectedly")
+			app.logger.Error("error while scanning stress test output", "error", err)
 			SendSSEErrorEvent(w, "Unexpected error occured while reading test output. Please try again later.", flusher)
 			return
 		}
 
 		if err := testCommand.Wait(); err != nil {
+			app.logger.Error("stress test command failed", "error", err)
 			SendSSEErrorEvent(w, "Unexpected error occured while running tests. Please try again later.", flusher)
-
 			return
 		} else {
-			fmt.Println("Stress test completed successfully.")
+			app.logger.Info("stress test completed successfully", "remote_addr", r.RemoteAddr)
 			fmt.Fprintf(w, "event: done\n")
 			fmt.Fprintf(w, "data: {\"outputLine\": \"Tests completed successfully.\"}\n\n")
 			flusher.Flush()
 		}
 	}
-
 }

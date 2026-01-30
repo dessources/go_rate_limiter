@@ -1,8 +1,9 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 )
 
 type Middleware func(http.Handler) http.Handler
@@ -15,10 +16,11 @@ const (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg, err := LoadConfig()
 	if err != nil {
-		//ToDo log that config was unable to  be loaded
-		log.Fatal(cfg)
+		logger.Error("failed to load configuration", "error", err)
+		return
 	}
 	server := &http.Server{
 		Addr: cfg.ServerAddr,
@@ -28,17 +30,19 @@ func main() {
 	EnableGracefulShutdown(idleConnsClosed, server)
 
 	//create global limiter & middleware
-	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware(InMemory, cfg.GlobalLimiterCount, cfg.GlobalLimiterCap, cfg.GlobalLimiterRate)
+	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware(logger, InMemory, cfg.GlobalLimiterCount, cfg.GlobalLimiterCap, cfg.GlobalLimiterRate)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to create global rate limiter middleware", "error", err)
+		return
 	}
 	defer globalRateLimiter.Offline()
 
 	//create per client limiter & middleware
-	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware(InMemory, cfg.PerClientLimiterCap, cfg.PerClientLimiterLimit, cfg.PerClientLimiterWindow, cfg.PerClientLimiterClientTtl)
+	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware(logger, InMemory, cfg.PerClientLimiterCap, cfg.PerClientLimiterLimit, cfg.PerClientLimiterWindow, cfg.PerClientLimiterClientTtl)
 
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to create per-client rate limiter middleware", "error", err)
+		return
 	}
 	defer perClientRateLimiter.Offline()
 
@@ -47,19 +51,21 @@ func main() {
 	//composed middleware for stress test route
 	stressTestMiddlewares, cleanup, err := MakeStressTestRouteMiddlewares()
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to create stress test route middlewares", "error", err)
+		return
 	}
 	defer cleanup()
 
 	//url shortener struct
 	shortener, err := NewUrlShortener(InMemory, cfg.ShortenerCap, cfg.ShortenerTTL, cfg.ShortCodeLength)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to create URL shortener", "error", err)
+		return
 	}
 	defer shortener.Offline()
 
 	//create app struct with methods for api handler logic
-	app := &App{cfg, shortener, globalRateLimiter, perClientRateLimiter}
+	app := &App{cfg, logger, shortener, globalRateLimiter, perClientRateLimiter}
 
 	//Route handlers
 	mux := http.NewServeMux()
@@ -70,11 +76,13 @@ func main() {
 	mux.Handle("GET /api/stress-test/stream", stressTestMiddlewares(http.HandlerFunc(app.StressTest)))
 	server.Handler = SetupCors(mux, cfg)
 
+	logger.Info("server starting", "addr", cfg.ServerAddr)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatal(err)
+		logger.Error("server failed to start", "error", err)
+		return
 	}
 
 	//wait for graceful shutdown
 	<-idleConnsClosed
-
+	logger.Info("server stopped gracefully")
 }

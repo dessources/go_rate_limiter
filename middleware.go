@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -10,7 +11,7 @@ import (
 
 var routesLimitedPerClient []string = []string{"/api/shorten", "/api/stress-test/stream"}
 
-func MakeGlobalRateLimitMiddleware(storageType StorageType, count int, cap int, rate int) (Middleware, *GlobalRateLimiter, error) {
+func MakeGlobalRateLimitMiddleware(logger *slog.Logger, storageType StorageType, count int, cap int, rate int) (Middleware, *GlobalRateLimiter, error) {
 	limiter, err := NewGlobalRateLimiter(storageType, count, cap, rate)
 	if err != nil {
 		return nil, nil, err
@@ -21,6 +22,7 @@ func MakeGlobalRateLimitMiddleware(storageType StorageType, count int, cap int, 
 			if limiter.Allow(1) {
 				next.ServeHTTP(w, r)
 			} else {
+				logger.Warn("global rate limit exceeded", "remote_addr", r.RemoteAddr, "path", r.URL.Path)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
 				json.NewEncoder(w).Encode(ErrorResponse{"We are a bit busy right now. Please try again later."})
@@ -30,7 +32,7 @@ func MakeGlobalRateLimitMiddleware(storageType StorageType, count int, cap int, 
 	}, limiter, nil
 }
 
-func MakePerClientRateLimitMiddleware(storageType StorageType, cap int, limit int, window, ttl time.Duration) (Middleware, *PerClientRateLimiter, error) {
+func MakePerClientRateLimitMiddleware(logger *slog.Logger, storageType StorageType, cap int, limit int, window, ttl time.Duration) (Middleware, *PerClientRateLimiter, error) {
 	limiter, err := NewPerClientRateLimiter(storageType, cap, limit, window, ttl)
 	if err != nil {
 		return nil, nil, err
@@ -50,7 +52,7 @@ func MakePerClientRateLimitMiddleware(storageType StorageType, cap int, limit in
 
 					apiKey := r.Header.Get("X-API-Key")
 					if apiKey == "" {
-						fmt.Println("Invalid API key provided")
+						logger.Warn("invalid API key provided", "remote_addr", r.RemoteAddr, "path", r.URL.Path)
 						w.Header().Set("Content-Type", "application/json")
 						w.WriteHeader(http.StatusUnauthorized)
 						errorMessage = "Invalid API key provided."
@@ -61,11 +63,12 @@ func MakePerClientRateLimitMiddleware(storageType StorageType, cap int, limit in
 					clientId := fmt.Sprintf("%s:%s", ip, apiKey)
 
 					if storageFull, err := limiter.Allow(clientId); err != nil {
-
 						if storageFull {
 							errorMessage = "We are a bit busy right now. Please try again later."
+							logger.Warn("per-client rate limiter storage full", "client_id", clientId, "path", r.URL.Path)
 						} else {
 							errorMessage = "Rate limit exceeded. Please try again later"
+							logger.Warn("per-client rate limit exceeded", "client_id", clientId, "path", r.URL.Path)
 						}
 
 						w.Header().Set("Content-Type", "application/json")
