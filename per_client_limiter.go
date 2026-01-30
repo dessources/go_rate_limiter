@@ -143,10 +143,10 @@ func (l *PerClientRateLimiter) Offline() {
 	close(l.done)
 }
 
-func NewPerClientRateLimiter(storateType StorageType, cap int, limit int, window time.Duration) (*PerClientRateLimiter, error) {
+func NewPerClientRateLimiter(storageType StorageType, cap int, limit int, window time.Duration) (*PerClientRateLimiter, error) {
 
 	var limiter PerClientRateLimiter
-	switch storateType {
+	switch storageType {
 	case InMemory:
 		logs := make(map[string][]time.Time)
 		done := make(chan struct{})

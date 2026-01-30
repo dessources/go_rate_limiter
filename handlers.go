@@ -213,7 +213,7 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 			default:
 				jsonData, err := json.Marshal(map[string]string{"outputLine": scanner.Text()})
 				if err != nil {
-					fmt.Fprintf(w, "data: %s\n\n", jsonData)
+					fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while reading test output. Please try again later.\"}\n\n")
 					flusher.Flush()
 					return
 				}

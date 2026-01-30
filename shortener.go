@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	MinAge     = time.Duration(time.Minute * 30)
+	MinAge     = time.Minute * 30
 	MinCap int = 10
 )
 
@@ -117,7 +117,7 @@ func NewUrlShortener(storageType StorageType, cap int, ttl time.Duration) (UrlSh
 		return nil, fmt.Errorf("Capacity has to be at least %d", MinCap)
 	}
 	if ttl < MinAge {
-		return nil, fmt.Errorf("Time to live has to be at least %d", MinAge)
+		return nil, fmt.Errorf("Time to live has to be at least %v ", MinAge)
 	}
 
 	var urlShortener UrlShortener

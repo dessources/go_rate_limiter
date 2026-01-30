@@ -38,7 +38,7 @@ func MakePerClientRateLimitMiddleware(storateType StorageType, cap int, limit in
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			errorMessage := "An unknown error occured"
+			var errorMessage string
 
 			//TODO: Clients should be identifed by combination of IP and API key
 			for _, route := range routesLimitedPerClient {

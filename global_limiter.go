@@ -59,8 +59,8 @@ func (b *MemoryBucket) Debit(count int) bool {
 }
 
 func (b *MemoryBucket) Len() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.count
 }
 

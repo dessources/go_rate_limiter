@@ -75,7 +75,7 @@ export default function StressTest() {
     }
   };
   const handleReset = () => {
-    if (stressTestStatus && evtSource) {
+    if (testIsRunning && evtSource) {
       evtSource.close();
     }
     setStressTestOutput(terminalStartMessage);
