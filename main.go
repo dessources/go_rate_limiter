@@ -59,6 +59,7 @@ func main() {
 	mux.Handle("GET /{shortUrl}", rateLimitGlobally(http.HandlerFunc(app.RetrieveUrl)))
 	mux.Handle("POST /api/shorten", withMiddlewares(http.HandlerFunc(app.ShortenUrl)))
 	mux.Handle("GET /api/metrics/stream", rateLimitGlobally(http.HandlerFunc(app.StreamMetrics)))
+	mux.HandleFunc("GET /api/stress-test/stream", StressTest)
 	server.Handler = SetupCors(mux)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {

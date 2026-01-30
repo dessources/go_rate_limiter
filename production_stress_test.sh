@@ -7,7 +7,30 @@ PORT=${1:-8091}
 
 BASE_URL="http://localhost:$PORT"
 
+echo "Waiting for test server to start on port $PORT..."
 
+# Keep trying until the server returns a 200 OK
+# -s: Silent mode
+# -f: Fail silently (returns non-zero exit code on 4xx/5xx)
+# -o /dev/null: Throw away the response body
+
+MAX_RETRIES=30
+COUNT=0
+
+while ! curl -s -f "$BASE_URL/" > /dev/null; do
+    if [ $COUNT -eq $MAX_RETRIES ]; then
+        echo "Error: Test server failed to start within 30 seconds."
+        exit 1
+    fi
+    
+    echo -n "." # Progress dots
+    sleep 1
+    ((COUNT++))
+done
+
+echo ""
+echo "✅ Server is up! Starting Stress Test Suite..."
+echo ""
 echo "=== Rate Limiter Stress Test Suite ==="
 echo "Targeting : $BASE_URL"
 echo ""
@@ -38,7 +61,9 @@ SHORTEN_RESPONSE=$(curl -s -X POST \
 echo "Response: $SHORTEN_RESPONSE"
 
 # Extract short URL code from response (assumes format "Short URL: XXXXXXXXXX")
-SHORT_CODE=$(echo "$SHORTEN_RESPONSE" | grep -oE ':"[A-Za-z0-9]{4}' | head -1)
+# SHORT_CODE=$(echo "$SHORTEN_RESPONSE" | grep -oE ':"[A-Za-z0-9]{4}' | head -1)
+SHORT_CODE=$(echo "$SHORTEN_RESPONSE" | sed -n 's/.*"shortCode":"\([^"]*\)".*/\1/p')
+
 echo "Extracted short code: $SHORT_CODE"
 echo ""
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -144,25 +145,27 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func StressTest(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
+		return
+	}
 
 	w.Header().Add("Content-Type", "text/event-stream")
 	w.Header().Add("Cache-Control", "no-cache")
 	w.Header().Add("Connection", "keep-alive")
 
 	if testServer, app, err := StartTestServer(); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(&ErrorResponse{"Failed to start test server. Please try again later."})
+		fmt.Fprintf(w, "data: {\"error\": \"Failed to start test server. Please try again later.\"}\n\n")
+		flusher.Flush()
 		return
 	} else {
-
 		defer app.shortener.Offline()
 		defer app.perClientRateLimiter.Offline()
 		defer app.globalRateLimiter.Offline()
-
-		// idleConsClosed := make(chan struct{})
-
-		// EnableGracefulShutdown(idleConsClosed, testServer)
+		defer testServer.Shutdown(context.Background())
 
 		serverStopUnexpected := make(chan struct{})
 
@@ -176,58 +179,58 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 		stdout, err := testCommand.StdoutPipe()
 		if err != nil {
 			fmt.Println(err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(&ErrorResponse{"Failed to start test script. Please try again later."})
+			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while running tests. Please try again later.\"}\n\n")
+			flusher.Flush()
 			return
 		}
 
 		testCommand.Stderr = testCommand.Stdout
 
 		if err := testCommand.Start(); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(&ErrorResponse{"Failed to start test script. Please try again later."})
+			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while running tests. Please try again later.\"}\n\n")
+			flusher.Flush()
 			return
 		}
 
 		scanner := bufio.NewScanner(stdout)
 
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
-			return
-		}
-
 		for scanner.Scan() {
 			select {
 
 			case <-r.Context().Done():
-				fmt.Println("Client closed connection. Stopping Metrics stream.")
+				fmt.Println("Client closed connection. Killing test...")
+				testCommand.Process.Kill()
+				return
+
+			case <-serverStopUnexpected:
+				fmt.Println("Test Server stopped unexpectedly")
+				fmt.Fprintf(w, "data: {\"error\": \"Test server stoped unexpectedly. Please try again later.\"}\n\n")
+				flusher.Flush()
 				return
 
 			default:
 				jsonData, err := json.Marshal(map[string]string{"outputLine": scanner.Text()})
 				if err != nil {
-					// testServer.Shutdown(context.TODO)
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
+					fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while  reading test output. Please try again later.\"}\n\n")
+					flusher.Flush()
 					return
 				}
 
 				fmt.Fprintf(w, "data: %s\n\n", jsonData)
 				flusher.Flush()
 			}
+		}
 
+		if err := scanner.Err(); err != nil {
+			fmt.Println("Test Server stopped unexpectedly")
+			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while reading test output. Please try again later.\"}\n\n")
+			flusher.Flush()
+			return
 		}
 
 		if err := testCommand.Wait(); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(&ErrorResponse{"Unexpected error occured while running tests. Please try again later."})
+			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while running tests. Please try again later.\"}\n\n")
+			flusher.Flush()
 			return
 		}
 	}

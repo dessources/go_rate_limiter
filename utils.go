@@ -122,14 +122,14 @@ func StartTestServer() (*http.Server, *App, error) {
 	//create global limiter & middleware
 	rateLimitGlobally, globalRateLimiter, err := MakeGlobalRateLimitMiddleware()
 	if err != nil {
-		return nil, nil, errors.New("")
+		return nil, nil, errors.New("Failed to create global rate limiter for stress test.")
 	}
-	defer globalRateLimiter.Offline()
 
 	//create per client limiter & middleware
 	rateLimitPerClient, perClientRateLimiter, err := MakePerClientRateLimitMiddleware()
 	if err != nil {
-		return nil, nil, errors.New("")
+		globalRateLimiter.Offline()
+		return nil, nil, errors.New("Failed to create per client rate limiter for stress test.")
 	}
 
 	//middleware composer
@@ -138,7 +138,9 @@ func StartTestServer() (*http.Server, *App, error) {
 	//url shortener struct
 	shortener, err := NewUrlShortener(InMemory, 100000, time.Hour)
 	if err != nil {
-		return nil, nil, errors.New("")
+		globalRateLimiter.Offline()
+		perClientRateLimiter.Offline()
+		return nil, nil, errors.New("Failed to create shortener instance for stress test.")
 	}
 
 	app := &App{shortener, globalRateLimiter, perClientRateLimiter}
