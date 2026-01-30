@@ -43,7 +43,7 @@ echo "Response: $SHORTEN_RESPONSE"
 
 # Extract short URL code from response (assumes format "Short URL: XXXXXXXXXX")
 SHORT_CODE=$(echo "$SHORTEN_RESPONSE" | grep -oE ':"[A-Za-z0-9]{4}' | head -1)
-echo "Extracted short code: $SHORT_CODE"
+SHORT_CODE=$(echo "$SHORTEN_RESPONSE" | sed -n 's/.*"shortCode":"\([^"]*\)".*/\1/p')
 echo ""
 
 # ============================================

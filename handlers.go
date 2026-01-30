@@ -206,6 +206,7 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("Test Server stopped unexpectedly")
 				fmt.Fprintf(w, "data: {\"error\": \"Test server stoped unexpectedly. Please try again later.\"}\n\n")
 				flusher.Flush()
+				testCommand.Process.Kill()
 				return
 
 			default:
