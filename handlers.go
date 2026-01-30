@@ -128,7 +128,8 @@ func (app *App) StreamMetrics(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				errorCount++
 				if errorCount > 2 {
-					json.NewEncoder(w).Encode(&ErrorResponse{"Metrics Streaming is currently unsupported."})
+					SendSSEErrorEvent(w, "Metrics Streaming is currently unavailable.", flusher)
+
 					return
 				}
 			}
@@ -158,8 +159,9 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Connection", "keep-alive")
 
 	if testServer, app, err := StartTestServer(); err != nil {
-		fmt.Fprintf(w, "data: {\"error\": \"Failed to start test server. Please try again later.\"}\n\n")
-		flusher.Flush()
+		//TODO log server start failure error message
+		SendSSEErrorEvent(w, "Failed to start test server. Please try again later.", flusher)
+
 		return
 	} else {
 		defer app.shortener.Offline()
@@ -179,8 +181,7 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 		stdout, err := testCommand.StdoutPipe()
 		if err != nil {
 			fmt.Println(err)
-			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while running tests. Please try again later.\"}\n\n")
-			flusher.Flush()
+			SendSSEErrorEvent(w, "Unexpected error occured while running tests. Please try again later.", flusher)
 			return
 		}
 
@@ -188,8 +189,8 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 
 		if err := testCommand.Start(); err != nil {
 			fmt.Println(err)
-			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while running tests. Please try again later.\"}\n\n")
-			flusher.Flush()
+
+			SendSSEErrorEvent(w, "Unexpected error occured while running tests. Please try again later.", flusher)
 			return
 		}
 
@@ -205,16 +206,15 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 
 			case <-serverStopUnexpected:
 				fmt.Println("Test Server stopped unexpectedly")
-				fmt.Fprintf(w, "data: {\"error\": \"Test server stoped unexpectedly. Please try again later.\"}\n\n")
-				flusher.Flush()
+
+				SendSSEErrorEvent(w, "Test server stoped unexpectedly. Please try again later.", flusher)
 				testCommand.Process.Kill()
 				return
 
 			default:
 				jsonData, err := json.Marshal(map[string]string{"outputLine": scanner.Text()})
 				if err != nil {
-					fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while reading test output. Please try again later.\"}\n\n")
-					flusher.Flush()
+					SendSSEErrorEvent(w, "Unexpected error occured while reading test output. Please try again later.", flusher)
 					return
 				}
 
@@ -225,14 +225,13 @@ func StressTest(w http.ResponseWriter, r *http.Request) {
 
 		if err := scanner.Err(); err != nil {
 			fmt.Println("Test Server stopped unexpectedly")
-			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while reading test output. Please try again later.\"}\n\n")
-			flusher.Flush()
+			SendSSEErrorEvent(w, "Unexpected error occured while reading test output. Please try again later.", flusher)
 			return
 		}
 
 		if err := testCommand.Wait(); err != nil {
-			fmt.Fprintf(w, "data: {\"error\": \"Unexpected error occured while running tests. Please try again later.\"}\n\n")
-			flusher.Flush()
+			SendSSEErrorEvent(w, "Unexpected error occured while running tests. Please try again later.", flusher)
+
 			return
 		} else {
 			fmt.Println("Stress test completed successfully.")

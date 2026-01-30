@@ -40,7 +40,7 @@ func MakePerClientRateLimitMiddleware(storateType StorageType, cap int, limit in
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var errorMessage string
 
-			//TODO: Clients should be identifed by combination of IP and API key
+			//Clients identifed by combination of IP and API key
 			for _, route := range routesLimitedPerClient {
 				if r.URL.Path == route {
 					ip, _, err := net.SplitHostPort(r.RemoteAddr)

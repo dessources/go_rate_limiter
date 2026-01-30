@@ -180,3 +180,9 @@ func MakeTestRouteMiddlewares() (Middleware, func(), error) {
 	}, nil
 
 }
+
+func SendSSEErrorEvent(w http.ResponseWriter, message string, f http.Flusher) {
+	fmt.Fprintf(w, "event: error\ndata: {\"errorMessage\": \"%s\"}\n\n", message)
+
+	f.Flush()
+}

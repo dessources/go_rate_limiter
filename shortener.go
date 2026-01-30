@@ -145,7 +145,7 @@ func NewUrlShortener(storageType StorageType, cap int, ttl time.Duration) (UrlSh
 
 const shortUrlLength int = 4
 
-var charTypes = [3]rune{48, 65, 97} // ascii start value for numbers, upper & lower letters
+var charTypes = [3]rune{'0', 'A', 'a'} // ascii start value for numbers, upper & lower letters
 
 func Shorten(s UrlShortener, original string) (string, error) {
 
